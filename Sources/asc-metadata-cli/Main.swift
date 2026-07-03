@@ -39,11 +39,11 @@ struct Sync: AsyncParsableCommand {
         let locales = metadata.whatsNewByLocale.keys.sorted()
         print("リリースノート読込: \(locales.joined(separator: ", "))")
 
-        let client = ASCClient(tokenGenerator: ASCTokenGenerator(
+        let client = try ASCClient(
             keyID: credentials.keyID,
             issuerID: credentials.issuerID,
             privateKeyPEM: credentials.privateKeyPEM
-        ))
+        )
 
         guard let app = try await client.findApp(bundleID: bundleId) else {
             throw CLIError("bundle ID \(bundleId) のアプリが見つかりません")

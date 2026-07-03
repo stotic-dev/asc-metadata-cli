@@ -6,9 +6,15 @@ let package = Package(
     platforms: [.macOS(.v13)],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
+        .package(url: "https://github.com/AvdLee/appstoreconnect-swift-sdk.git", from: "4.4.0"),
     ],
     targets: [
-        .target(name: "ASCMetadataKit"),
+        .target(
+            name: "ASCMetadataKit",
+            dependencies: [
+                .product(name: "AppStoreConnect-Swift-SDK", package: "appstoreconnect-swift-sdk"),
+            ]
+        ),
         .executableTarget(
             name: "asc-metadata-cli",
             dependencies: [

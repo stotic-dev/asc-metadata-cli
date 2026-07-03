@@ -18,6 +18,11 @@ Xcode Cloud の Release ワークフローでの ipa アップロードと分業
 - macOS 13+
 - Swift 6.0+
 
+## 依存ライブラリ
+
+- [AppStoreConnect-Swift-SDK](https://github.com/AvdLee/appstoreconnect-swift-sdk): JWT 認証と App Store Connect API クライアント(OpenAPI 生成)。通信層はすべてこの SDK に委譲し、本ツールは「メタ情報の読み込み + 同期ロジック」のみを実装している
+- [swift-argument-parser](https://github.com/apple/swift-argument-parser): CLI 引数パース
+
 ## セットアップ
 
 ### 1. App Store Connect API キーの発行
