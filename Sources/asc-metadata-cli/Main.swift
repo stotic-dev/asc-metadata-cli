@@ -15,7 +15,7 @@ struct ASCMetadataCLI: AsyncParsableCommand {
 struct Sync: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "sync",
-        abstract: "指定バージョンを作成 (存在すれば再利用) し、リリースノートを同期する"
+        abstract: "指定バージョンを作成 (存在すれば再利用) し、リリースノートとスクリーンショットを同期する"
     )
 
     @Option(help: "対象アプリの bundle ID (例: jp.pivotmedia.pivot)")
@@ -38,6 +38,10 @@ struct Sync: AsyncParsableCommand {
         let metadata = try MetadataStore.load(from: URL(fileURLWithPath: metadataDir))
         let locales = metadata.whatsNewByLocale.keys.sorted()
         print("リリースノート読込: \(locales.joined(separator: ", "))")
+        for (locale, sets) in metadata.screenshotSetsByLocale.sorted(by: { $0.key < $1.key }) {
+            let summary = sets.map { "\($0.displayType) \($0.files.count) 枚" }.joined(separator: ", ")
+            print("スクリーンショット読込: \(locale) (\(summary))")
+        }
 
         let client = try ASCClient(
             keyID: credentials.keyID,
@@ -63,6 +67,11 @@ struct Sync: AsyncParsableCommand {
             for locale in locales {
                 print("[dry-run] \(locale): リリースノートを設定します")
             }
+            for (locale, sets) in metadata.screenshotSetsByLocale.sorted(by: { $0.key < $1.key }) {
+                for set in sets {
+                    print("[dry-run] \(locale)/\(set.displayType): スクリーンショット \(set.files.count) 枚をアップロードします")
+                }
+            }
             return
         } else {
             targetVersion = try await client.createVersion(
@@ -74,6 +83,7 @@ struct Sync: AsyncParsableCommand {
         }
 
         try await syncReleaseNotes(client: client, versionID: targetVersion.id, metadata: metadata)
+        try await syncScreenshots(client: client, versionID: targetVersion.id, metadata: metadata)
         print("完了")
     }
 
@@ -107,6 +117,95 @@ struct Sync: AsyncParsableCommand {
                 )
                 print("\(locale): ローカリゼーションを作成してリリースノートを設定しました")
             }
+        }
+    }
+
+    private func syncScreenshots(
+        client: ASCClient,
+        versionID: String,
+        metadata: ReleaseMetadata
+    ) async throws {
+        guard !metadata.screenshotSetsByLocale.isEmpty else { return }
+        // リリースノート同期で新規作成されたローカリゼーションを含めて取り直す
+        let localizations = try await client.localizations(versionID: versionID)
+        for (locale, sets) in metadata.screenshotSetsByLocale.sorted(by: { $0.key < $1.key }) {
+            let localizationID: String
+            if let existing = localizations.first(where: { $0.locale == locale }) {
+                localizationID = existing.id
+            } else if dryRun {
+                print("[dry-run] \(locale): ローカリゼーションを新規作成します")
+                for set in sets {
+                    print("[dry-run] \(locale)/\(set.displayType): スクリーンショット \(set.files.count) 枚をアップロードします")
+                }
+                continue
+            } else {
+                let created = try await client.createLocalization(
+                    versionID: versionID,
+                    locale: locale,
+                    whatsNew: metadata.whatsNewByLocale[locale]
+                )
+                print("\(locale): ローカリゼーションを作成しました")
+                localizationID = created.id
+            }
+
+            let remoteSets = try await client.screenshotSets(localizationID: localizationID)
+            for set in sets {
+                try await syncScreenshotSet(
+                    client: client,
+                    locale: locale,
+                    localizationID: localizationID,
+                    set: set,
+                    remoteSet: remoteSets.first { $0.displayType == set.displayType }
+                )
+            }
+        }
+    }
+
+    private func syncScreenshotSet(
+        client: ASCClient,
+        locale: String,
+        localizationID: String,
+        set: ScreenshotSetMetadata,
+        remoteSet: ASCClient.ScreenshotSet?
+    ) async throws {
+        let label = "\(locale)/\(set.displayType)"
+        let localFiles = try set.files.map { url in
+            (fileName: url.lastPathComponent, checksum: Checksum.md5Hex(of: try Data(contentsOf: url)))
+        }
+
+        if let remoteSet {
+            let remote = try await client.screenshots(screenshotSetID: remoteSet.id)
+            let isSame = remote.count == localFiles.count && zip(remote, localFiles).allSatisfy {
+                $0.fileName == $1.fileName && $0.sourceFileChecksum == $1.checksum
+            }
+            if isSame {
+                print("\(label): 変更なしのためスキップ")
+                return
+            }
+            if dryRun {
+                print("[dry-run] \(label): 既存 \(remote.count) 枚を削除して \(localFiles.count) 枚をアップロードします")
+                return
+            }
+            for screenshot in remote {
+                try await client.deleteScreenshot(id: screenshot.id)
+            }
+            for file in set.files {
+                try await client.uploadScreenshot(screenshotSetID: remoteSet.id, fileURL: file)
+            }
+            print("\(label): 既存 \(remote.count) 枚を置き換えて \(localFiles.count) 枚をアップロードしました")
+        } else {
+            if dryRun {
+                print("[dry-run] \(label): セットを作成して \(localFiles.count) 枚をアップロードします")
+                return
+            }
+            let created = try await client.createScreenshotSet(
+                localizationID: localizationID,
+                displayType: set.displayType
+            )
+            for file in set.files {
+                try await client.uploadScreenshot(screenshotSetID: created.id, fileURL: file)
+            }
+            print("\(label): セットを作成して \(localFiles.count) 枚をアップロードしました")
         }
     }
 }

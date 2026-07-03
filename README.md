@@ -4,14 +4,16 @@ App Store Connect の新バージョン作成とメタ情報更新を行う Swif
 
 Xcode Cloud の Release ワークフローでの ipa アップロードと分業し、リポジトリ内で管理しているメタ情報（リリースノート等）を App Store Connect に同期することを目的としている。
 
-## MVP スコープ
+## スコープ
 
 - [x] 新バージョンの作成（既に存在する場合は再利用）
 - [x] リリースノート（What's New）のロケール別同期
   - 変更がないロケールはスキップ
   - ローカリゼーションが存在しない場合は新規作成
-- [ ] スクリーンショット同期（第 2 段で対応予定）
-- [ ] ビルドのバージョン紐付け・審査提出（第 2 段以降で検討）
+- [x] スクリーンショット同期（ロケール × displayType 別）
+  - ファイル名 + MD5 チェックサムが順序込みで一致するセットはスキップ
+  - 差分があるセットは既存を全削除して再アップロード（fastlane deliver と同方式）
+- [ ] ビルドのバージョン紐付け・審査提出（今後検討）
 
 ## 必要環境
 
@@ -64,13 +66,23 @@ swift run asc-metadata-cli sync \
 ```
 metadata/
 ├── ja/
-│   └── release_notes.txt
+│   ├── release_notes.txt
+│   └── screenshots/
+│       ├── APP_IPHONE_67/
+│       │   ├── 01_home.png
+│       │   └── 02_player.png
+│       └── APP_IPAD_PRO_3GEN_129/
+│           └── 01_home.png
 └── en-US/
     └── release_notes.txt
 ```
 
 - ディレクトリ名は App Store Connect のロケール識別子（`ja`, `en-US` 等）に合わせる
 - `release_notes.txt` が空のロケールはスキップされる
+- `screenshots/` 配下のディレクトリ名は App Store Connect API の [screenshotDisplayType](https://developer.apple.com/documentation/appstoreconnectapi/screenshotdisplaytype)（`APP_IPHONE_67` 等）に合わせる
+- スクリーンショットの表示順はファイル名昇順（`01_`, `02_` のような接頭辞で制御する）
+- 対応拡張子は png / jpg / jpeg。それ以外のファイル（`.DS_Store` 等）は無視される
+- `release_notes.txt` と `screenshots/` はどちらか一方だけでもよい
 
 ## Xcode Cloud との連携方針
 
@@ -96,6 +108,10 @@ fi
 - アプリの**初回バージョン**にはリリースノート（What's New）を設定できない（App Store Connect の仕様）
 - ビルドとバージョンの紐付けはビルド処理完了（通常 10〜30 分）を待つ必要があるため、MVP では扱わない
 - 対象バージョンが編集不可の状態（審査中等）の場合、メタ情報の更新は API エラーになる
+- スクリーンショットは displayType のディレクトリ単位で「全削除 → 再アップロード」する。App Store Connect 側だけで並び替え・差し替えした内容はリポジトリ側と差分が出た時点で上書きされる
+- リポジトリに存在しない displayType / ロケールのスクリーンショットセットは削除しない（安全側に倒している）
+- 画像サイズが displayType の要求解像度と一致しない場合、アップロード自体は成功するが App Store Connect 側の検証で `FAILED` になる
+- App Store Connect API の OpenAPI spec ではスクリーンショット系エンドポイントが deprecated 指定されているため、ビルド時に deprecation 警告が出る（API 自体は現行で動作する。fastlane deliver も同じエンドポイントを使用）
 
 ## テスト
 
