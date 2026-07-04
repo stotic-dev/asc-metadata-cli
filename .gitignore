@@ -3,3 +3,6 @@
 *.p8
 .DS_Store
 xcuserdata/
+
+# make binary / make release で生成するビルド成果物（リリース時に添付するため追跡しない）
+binary/

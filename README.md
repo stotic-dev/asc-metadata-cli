@@ -113,6 +113,34 @@ fi
 - 画像サイズが displayType の要求解像度と一致しない場合、アップロード自体は成功するが App Store Connect 側の検証で `FAILED` になる
 - App Store Connect API の OpenAPI spec ではスクリーンショット系エンドポイントが deprecated 指定されているため、ビルド時に deprecation 警告が出る（API 自体は現行で動作する。fastlane deliver も同じエンドポイントを使用）
 
+## バイナリ配布
+
+リリース時に、ビルド済みの実行可能ファイルを SwiftPM の [`.binaryTarget`](https://developer.apple.com/documentation/packagedescription/target/binarytarget(name:url:checksum:)) から参照できる `artifactbundle` 形式（zip）で配布する。利用側はソースからビルドせずに CLI を組み込める。
+
+### 成果物の生成（メンテナ向け）
+
+```sh
+# arm64 / x86_64 の universal binary を ./binary/asc-metadata-cli に生成
+make binary
+
+# artifactbundle.zip と checksum を生成（リリース添付用）
+make release VERSION=1.0.0
+```
+
+`binary/` 配下の生成物は追跡対象外（`.gitignore` 済み）。リリースは GitHub Actions の `Release` ワークフロー（`.github/workflows/release.yml`）を手動実行し、`version`（例: `1.0.0`）を入力する。ワークフローは universal binary をビルドし、`v<version>` タグを作成して `asc-metadata-cli.artifactbundle.zip` を GitHub Release に添付する。
+
+### 利用側での組み込み
+
+`make release` が出力した checksum を使い、依存パッケージの `Package.swift` に次を追加する。
+
+```swift
+.binaryTarget(
+    name: "asc-metadata-cli",
+    url: "https://github.com/stotic-dev/asc-metadata-cli/releases/download/v1.0.0/asc-metadata-cli.artifactbundle.zip",
+    checksum: "<make release が出力した checksum>"
+)
+```
+
 ## テスト
 
 ```sh

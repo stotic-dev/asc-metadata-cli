@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "リリースバージョン (v は付けない。例: 1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: タグ名を決定
+        id: tag
+        run: echo "name=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+
+      - name: artifactbundle をビルド
+        run: make release VERSION=${{ inputs.version }}
+
+      - name: タグを作成し GitHub Release にバイナリ zip を添付
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.tag.outputs.name }}" \
+            binary/asc-metadata-cli.artifactbundle.zip \
+            binary/asc-metadata-cli.artifactbundle.zip.checksum \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.tag.outputs.name }}" \
+            --generate-notes
