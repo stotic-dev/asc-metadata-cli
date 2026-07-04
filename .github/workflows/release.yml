@@ -13,9 +13,14 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Swift バージョンを確認
+        run: swift --version
 
       - name: タグ名を決定
         id: tag
@@ -28,9 +33,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.tag.outputs.name }}" \
-            binary/asc-metadata-cli.artifactbundle.zip \
-            binary/asc-metadata-cli.artifactbundle.zip.checksum \
-            --target "$GITHUB_SHA" \
-            --title "${{ steps.tag.outputs.name }}" \
-            --generate-notes
+          # 既存の最新タグをリリースノートの起点にする (新タグはまだ未作成)
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            gh release create "${{ steps.tag.outputs.name }}" \
+              binary/asc-metadata-cli.artifactbundle.zip \
+              binary/asc-metadata-cli.artifactbundle.zip.checksum \
+              --target "$GITHUB_SHA" \
+              --title "Release ${{ steps.tag.outputs.name }}" \
+              --generate-notes \
+              --notes-start-tag "$PREVIOUS_TAG"
+          else
+            gh release create "${{ steps.tag.outputs.name }}" \
+              binary/asc-metadata-cli.artifactbundle.zip \
+              binary/asc-metadata-cli.artifactbundle.zip.checksum \
+              --target "$GITHUB_SHA" \
+              --title "Release ${{ steps.tag.outputs.name }}" \
+              --generate-notes
+          fi
+          echo "🎉 GitHub Release を作成しました"
