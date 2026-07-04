@@ -13,8 +13,8 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
-    timeout-minutes: 30
+    runs-on: macos-26
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
