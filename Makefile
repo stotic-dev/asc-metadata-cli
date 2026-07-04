@@ -15,8 +15,8 @@ VARIANT_DIR  := $(EXECUTABLE)-$(VERSION)-macos
 # arm64 / x86_64 の universal binary を release ビルドして $(BINARY_PATH) に配置する
 binary:
 	swift build -v -c release --product $(EXECUTABLE)
-	BIN=$$(find .build -path "*/release/asc-metadata-cli" | head -1)
-	test -n "$$BIN"
+	BIN=$$(find .build -path "*/release/asc-metadata-cli" | head -1); \
+	test -n "$$BIN"; \
 	cp "$$BIN" $(BINARY_PATH)
 
 # SwiftPM の .binaryTarget から参照できる artifactbundle を作成する
