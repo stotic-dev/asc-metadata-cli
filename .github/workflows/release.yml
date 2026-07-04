@@ -14,42 +14,101 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Swift バージョンを確認
-        run: swift --version
+        run: |
+          swift --version
+          echo "✅ Swift ツールチェーンを確認しました"
 
-      - name: タグ名を決定
-        id: tag
-        run: echo "name=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+      - name: バージョンを検証しタグ名を決定
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          # x.y.z 形式かどうかを検証
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::バージョンは x.y.z 形式で指定してください (例: 1.0.0)。入力値: $VERSION"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "📦 バージョン: $VERSION"
+
+      - name: タグの重複を確認
+        run: |
+          if git rev-parse "${{ steps.version.outputs.tag_name }}" >/dev/null 2>&1; then
+            echo "::error::タグ ${{ steps.version.outputs.tag_name }} は既に存在します"
+            exit 1
+          fi
+          echo "✅ タグ ${{ steps.version.outputs.tag_name }} は未使用です"
 
       - name: artifactbundle をビルド
-        run: make release VERSION=${{ inputs.version }}
+        run: |
+          make release VERSION=${{ steps.version.outputs.version }}
+          echo "🔨 artifactbundle をビルドしました"
+
+      - name: チェックサムを取得
+        id: checksum
+        run: |
+          CHECKSUM=$(cat binary/asc-metadata-cli.artifactbundle.zip.checksum)
+          echo "value=$CHECKSUM" >> "$GITHUB_OUTPUT"
+          echo "🔑 checksum: $CHECKSUM"
 
       - name: タグを作成し GitHub Release にバイナリ zip を添付
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # 既存の最新タグをリリースノートの起点にする (新タグはまだ未作成)
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-
           if [ -n "$PREVIOUS_TAG" ]; then
-            gh release create "${{ steps.tag.outputs.name }}" \
-              binary/asc-metadata-cli.artifactbundle.zip \
-              binary/asc-metadata-cli.artifactbundle.zip.checksum \
-              --target "$GITHUB_SHA" \
-              --title "Release ${{ steps.tag.outputs.name }}" \
-              --generate-notes \
-              --notes-start-tag "$PREVIOUS_TAG"
+            echo "📝 前回タグ $PREVIOUS_TAG を起点にリリースノートを生成します"
+            NOTES_ARGS=(--generate-notes --notes-start-tag "$PREVIOUS_TAG")
           else
-            gh release create "${{ steps.tag.outputs.name }}" \
-              binary/asc-metadata-cli.artifactbundle.zip \
-              binary/asc-metadata-cli.artifactbundle.zip.checksum \
-              --target "$GITHUB_SHA" \
-              --title "Release ${{ steps.tag.outputs.name }}" \
-              --generate-notes
+            echo "📝 初回リリースのため全履歴からリリースノートを生成します"
+            NOTES_ARGS=(--generate-notes)
           fi
-          echo "🎉 GitHub Release を作成しました"
+
+          RELEASE_URL=$(gh release create "${{ steps.version.outputs.tag_name }}" \
+            binary/asc-metadata-cli.artifactbundle.zip \
+            binary/asc-metadata-cli.artifactbundle.zip.checksum \
+            --target "$GITHUB_SHA" \
+            --title "Release ${{ steps.version.outputs.tag_name }}" \
+            "${NOTES_ARGS[@]}")
+
+          echo "url=$RELEASE_URL" >> "$GITHUB_OUTPUT"
+          echo "🎉 GitHub Release を作成しました: $RELEASE_URL"
+
+      - name: サマリを出力
+        if: always()
+        run: |
+          echo "# リリース結果 🏷️" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.release.outcome }}" == "success" ]; then
+            echo "✅ リリースが完了しました" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **バージョン**: ${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **タグ**: ${{ steps.version.outputs.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Release**: ${{ steps.release.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **checksum**: \`${{ steps.checksum.outputs.value }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "## 利用側の .binaryTarget 設定" >> "$GITHUB_STEP_SUMMARY"
+            echo '```swift' >> "$GITHUB_STEP_SUMMARY"
+            echo '.binaryTarget(' >> "$GITHUB_STEP_SUMMARY"
+            echo '    name: "asc-metadata-cli",' >> "$GITHUB_STEP_SUMMARY"
+            echo "    url: \"${{ github.server_url }}/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag_name }}/asc-metadata-cli.artifactbundle.zip\"," >> "$GITHUB_STEP_SUMMARY"
+            echo "    checksum: \"${{ steps.checksum.outputs.value }}\"" >> "$GITHUB_STEP_SUMMARY"
+            echo ')' >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "❌ リリースに失敗しました。上のログを確認してください。" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **入力バージョン**: ${{ inputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
